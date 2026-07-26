@@ -8,14 +8,40 @@
   var T_CENTS = 1800;         // ticket base (18,00) em centavos
   var INICIO_OPERACAO = Date.UTC(2026, 2, 20); // 20/03/2026
 
+  // Documentos internos, comparados pelos DÍGITOS (ignora pontuação/formato).
   var DOCS_INTERNOS = {
     "22976763879": 1, "09788994903": 1, "03932536860": 1,
     "67899684820": 1, "36737934897": 1, "36155275858": 1,
   };
 
+  // Documentos bloqueados pelo TEXTO EXATO (docs "quebrados", com letras).
+  var DOCS_BLOQUEADOS_RAW = {
+    "w1879999": 1, "111111": 1, "555.5trer": 1,
+  };
+
+  // "Agrupar iguais": cadastros duplicados da mesma pessoa.
+  // Mapeia cada documento alias -> documento DOMINANTE (que fica no relatório).
+  // As vendas dos aliases entram no dominante; a linha do alias some.
+  // Cadastro = mais antigo, Ultima = mais recente, Nome/Telefone = do dominante.
+  var GRUPOS = {
+    "378.862.073oo": "37886207300",   // Francisco Cesar Dos Santos (CPF digitado errado)
+    "w21288": "w2128895",             // Fern
+    "212256": "w2128895",             // Fern
+    "46465667": "9168460831",         // David
+  };
+
+  // Índice de aliases por texto exato E por dígitos, para casar em qualquer formato.
+  var ALIAS = {};
+  for (var _a in GRUPOS) {
+    if (!GRUPOS.hasOwnProperty(_a)) continue;
+    ALIAS[_a] = GRUPOS[_a];
+    var _d = _a.replace(/\D/g, "");
+    if (_d) ALIAS[_d] = GRUPOS[_a];
+  }
+
   var COLUNAS = [
     "Nome", "Documento", "Telefone", "Email", "Cadastro", "Longevidade",
-    "Ultima", "Intervalo", "Dias Visita", "Retorno", "Visitas", "Usos",
+    "Ultima", "Ritmo", "Dias Visita", "Retorno", "Visitas", "Usos",
     "Faturamento", "TM", "Frequentador", "Bala na Agulha", "Descontos",
     "Saldo", "Cupons",
   ];
@@ -25,6 +51,28 @@
   // ---------------------------------------------------------------- utils
 
   function soDigitos(v) { return (v || "").replace(/\D/g, ""); }
+
+  // Documento bloqueado? (interno por dígitos OU texto exato quebrado)
+  function bloqueado(rawDoc) {
+    var t = (rawDoc || "").trim();
+    if (DOCS_BLOQUEADOS_RAW[t]) return true;
+    return !!DOCS_INTERNOS[soDigitos(t)];
+  }
+
+  // Resolve alias -> dominante (texto exato). Não-alias volta como está (trim).
+  function resolveDominante(rawDoc) {
+    var t = (rawDoc || "").trim();
+    if (ALIAS[t]) return ALIAS[t];
+    var d = soDigitos(t);
+    if (d && ALIAS[d]) return ALIAS[d];
+    return t;
+  }
+
+  // Chave de agrupamento (após resolver alias): dígitos, ou o texto se não houver.
+  function chaveDoc(rawDoc) {
+    var dom = resolveDominante(rawDoc);
+    return soDigitos(dom) || dom.toLowerCase();
+  }
 
   function semAcento(v) {
     return (v || "").normalize("NFKD").replace(/[\u0300-\u036f]/g, "");
@@ -241,8 +289,11 @@
       var l = linhas[i];
       var cnorm = cupomNorm(l["Codigo_Cupom"]);
       if (cnorm === "testes") continue;
-      var doc = soDigitos(l["Doc_Cliente"]);
-      if (!doc || DOCS_INTERNOS[doc]) continue;
+      var docRaw = l["Doc_Cliente"];
+      if (!soDigitos(docRaw) && !(docRaw || "").trim()) continue;
+      if (bloqueado(docRaw)) continue;
+      var doc = chaveDoc(docRaw);   // resolve alias -> chave do dominante
+      if (!doc) continue;
       var ms = parseData(l["Data_Hora"]);
       if (ms == null) continue;
 
@@ -297,20 +348,48 @@
   }
 
   function montaLinhas(clientes, vendas, hojeMs) {
-    var saida = [];
+    // 1) agrupa linhas de cliente por chave (resolvendo alias), pulando bloqueados.
+    var grupos = {}, ordem = [];
     for (var i = 0; i < clientes.length; i++) {
-      var cli = clientes[i];
-      var doc = soDigitos(cli["Documento"]);
-      if (!doc || DOCS_INTERNOS[doc]) continue;
+      var c = clientes[i];
+      var docRaw = c["Documento"];
+      if (!(docRaw || "").trim()) continue;
+      if (bloqueado(docRaw)) continue;
+      var k = chaveDoc(docRaw);
+      if (!k) continue;
+      var g = grupos[k];
+      if (!g) { g = grupos[k] = { rows: [], dom: null }; ordem.push(k); }
+      g.rows.push(c);
+      // linha dominante = a que não é alias (resolve para si mesma)
+      if (resolveDominante(docRaw) === (docRaw || "").trim()) g.dom = c;
+    }
 
-      var cadMs = parseData(cli["Data_Cadastro"]);
-      var horaCad = (function () {
-        var t = (cli["Data_Cadastro"] || "").trim();
-        var m = t.match(/(\d{2}:\d{2}:\d{2})/);
-        return m ? m[1] : "";
-      })();
+    var saida = [];
+    for (var oi = 0; oi < ordem.length; oi++) {
+      var key = ordem[oi];
+      var grp = grupos[key];
+      var cli = grp.dom || grp.rows[0];   // dados de identificação vêm do dominante
 
-      var ag = vendas[doc] || { fat: 0, usos: 0, visitas: {}, desc: 0, cupons: {} };
+      // mescla datas e saldo entre as linhas do grupo ("agrupar iguais")
+      var cadTs = null, cadRow = null, ducMax = null, saldoCents = 0;
+      for (var r = 0; r < grp.rows.length; r++) {
+        var row = grp.rows[r];
+        var ts = parseTs(row["Data_Cadastro"]);
+        if (ts != null && (cadTs == null || ts < cadTs)) { cadTs = ts; cadRow = row; }
+        var d = parseData(row["Data_Ultima_Compra"]);
+        if (d != null && (ducMax == null || d > ducMax)) ducMax = d;
+        saldoCents += parseCents(row["Saldo_Carteira"]);
+      }
+
+      var cadMs = null, horaCad = "";
+      if (cadTs != null) {
+        var cd = new Date(cadTs);
+        cadMs = Date.UTC(cd.getUTCFullYear(), cd.getUTCMonth(), cd.getUTCDate());
+        var mm = (cadRow["Data_Cadastro"] || "").match(/(\d{2}:\d{2}:\d{2})/);
+        horaCad = mm ? mm[1] : "";
+      }
+
+      var ag = vendas[key] || { fat: 0, usos: 0, visitas: {}, desc: 0, cupons: {} };
       var visitas = Object.keys(ag.visitas).map(Number).sort(function (a, b) { return a - b; });
 
       var ultimaMs;
@@ -318,8 +397,7 @@
         ultimaMs = cadMs;
       } else {
         ultimaMs = visitas[visitas.length - 1];
-        var duc = parseData(cli["Data_Ultima_Compra"]);
-        if (duc != null && duc > ultimaMs) ultimaMs = duc;
+        if (ducMax != null && ducMax > ultimaMs) ultimaMs = ducMax;
       }
 
       var freq = classificaFrequentador(visitas, hojeMs);
@@ -345,7 +423,7 @@
       var cupons = Object.keys(ag.cupons).sort();
 
       saida.push({
-        _cad: parseTs(cli["Data_Cadastro"]),
+        _cad: cadTs,
         "Nome": (cli["Nome"] || "").trim(),
         "Documento": (cli["Documento"] || "").trim(),
         "Telefone": (cli["Telefone"] || "").trim(),
@@ -353,7 +431,7 @@
         "Cadastro": cadMs != null ? fmtDataHora(cadMs, horaCad) : "",
         "Longevidade": longevidade(cadMs, hojeMs),
         "Ultima": fmtData(ultimaMs),
-        "Intervalo": fmtIntervalo(visitas),
+        "Ritmo": fmtIntervalo(visitas),
         "Dias Visita": String(diasVisita),
         "Retorno": fmtData(retornoMs),
         "Visitas": String(visitas.length),
@@ -363,7 +441,7 @@
         "Frequentador": freq,
         "Bala na Agulha": bala,
         "Descontos": fmtCents(ag.desc),
-        "Saldo": fmtCents(parseCents(cli["Saldo_Carteira"])),
+        "Saldo": fmtCents(saldoCents),
         "Cupons": cupons.join("; "),
       });
     }
