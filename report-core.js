@@ -19,6 +19,11 @@
     "w1879999": 1, "111111": 1, "555.5trer": 1,
   };
 
+  // Documentos bloqueados pelos DÍGITOS (CPFs inválidos, ignora vírgula/pontuação).
+  var DOCS_BLOQUEADOS_DIG = {
+    "333234887": 1,   // CPF inválido/inexistente, cadastrado com vírgula
+  };
+
   // "Agrupar iguais": cadastros duplicados da mesma pessoa.
   // Mapeia cada documento alias -> documento DOMINANTE (que fica no relatório).
   // As vendas dos aliases entram no dominante; a linha do alias some.
@@ -28,6 +33,13 @@
     "w21288": "w2128895",             // Fern
     "212256": "w2128895",             // Fern
     "46465667": "9168460831",         // David
+    "327.928.680-1": "35793289801",   // Roberes Martins
+  };
+
+  // Sobrescritas por dominante (chave = só dígitos): força campos no resultado.
+  // Ex.: o Roberes fica com o telefone do outro cadastro, não o do dominante.
+  var OVERRIDES = {
+    "35793289801": { "Telefone": "11960545827" },
   };
 
   // Índice de aliases por texto exato E por dígitos, para casar em qualquer formato.
@@ -51,6 +63,16 @@
   // ---------------------------------------------------------------- utils
 
   function soDigitos(v) { return (v || "").replace(/\D/g, ""); }
+
+  // Remove caracteres especiais (mantém letras e dígitos) — p/ Documento e Telefone.
+  // "359.623.888-95" -> "35962388895"; "(11) 99153-6994" -> "11991536994".
+  function limpaDoc(v) { return (v || "").replace(/[^0-9A-Za-z]/g, ""); }
+
+  // Longevidade em dias (numérico): dias de Cadastro até hoje.
+  function longevidadeDias(cadMs, hojeMs) {
+    if (cadMs == null) return "";
+    return String(Math.max(0, Math.round((hojeMs - cadMs) / DIA)));
+  }
 
   // Documento bloqueado? (interno por dígitos OU texto exato quebrado)
   function bloqueado(rawDoc) {
@@ -422,14 +444,14 @@
 
       var cupons = Object.keys(ag.cupons).sort();
 
-      saida.push({
+      var rec = {
         _cad: cadTs,
         "Nome": (cli["Nome"] || "").trim(),
-        "Documento": (cli["Documento"] || "").trim(),
-        "Telefone": (cli["Telefone"] || "").trim(),
+        "Documento": limpaDoc(cli["Documento"]),
+        "Telefone": limpaDoc(cli["Telefone"]),
         "Email": (cli["Email"] || "").trim(),
         "Cadastro": cadMs != null ? fmtDataHora(cadMs, horaCad) : "",
-        "Longevidade": longevidade(cadMs, hojeMs),
+        "Longevidade": longevidadeDias(cadMs, hojeMs),
         "Ultima": fmtData(ultimaMs),
         "Ritmo": fmtIntervalo(visitas),
         "Dias Visita": String(diasVisita),
@@ -443,7 +465,12 @@
         "Descontos": fmtCents(ag.desc),
         "Saldo": fmtCents(saldoCents),
         "Cupons": cupons.join("; "),
-      });
+      };
+      var ov = OVERRIDES[key];      // sobrescritas por dominante (ex.: telefone do Roberes)
+      if (ov) for (var f in ov) if (ov.hasOwnProperty(f)) {
+        rec[f] = (f === "Documento" || f === "Telefone") ? limpaDoc(ov[f]) : ov[f];
+      }
+      saida.push(rec);
     }
 
     // ordena por Cadastro asc, nulos por ultimo, estavel

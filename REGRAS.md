@@ -36,6 +36,8 @@ agregações. Um documento que só exista em vendas não entra no relatório.
 - **Documentos bloqueados** (não aparecem no resultado):
   - Internos, comparados pelos **dígitos**: `22976763879, 09788994903,
     03932536860, 67899684820, 36737934897, 36155275858`.
+  - CPFs inválidos, comparados pelos **dígitos** (ignora vírgula/pontuação):
+    `333234887`.
   - Quebrados, comparados pelo **texto exato**: `w1879999, 111111, 555.5trer`.
 
 ## Agrupar iguais (cadastros duplicados da mesma pessoa)
@@ -49,12 +51,17 @@ os aliases somem. As vendas de todos entram no dominante.
 | `37886207300` | `378.862.073oo` | Francisco Cesar Dos Santos |
 | `w2128895` | `w21288`, `212256` | Fern |
 | `9168460831` | `46465667` | David |
+| `35793289801` | `327.928.680-1` | Roberes Martins |
 
 Ao agrupar:
 - **Cadastro** = o mais antigo entre as linhas.
 - **Última** = a mais recente (via vendas/última compra).
 - **Nome, Telefone, Email, Documento** = os do dominante.
 - **Faturamento, Usos, Visitas, Descontos, Cupons, Saldo** = somados/unidos.
+
+**Sobrescritas (OVERRIDES).** Quando um campo não deve vir do dominante, use o mapa
+`OVERRIDES` do `report-core.js`. Ex.: o Roberes fica com o Telefone `11960545827`
+(o do outro cadastro), não o do dominante.
 
 ## Parsing
 
@@ -100,8 +107,9 @@ Recarga conta como faturamento, mas não gera visita nem uso.
   - ⚠️ O Retorno usa a janela de 3V; o **Ritmo** usa o histórico completo.
 - **Bala na Agulha** (pelo TM): 0 → **Liso**; ≤ 2T (36) → **Econômico**;
   ≤ 3T (54) → **Prata**; ≤ 5T (90) → **Ouro**; > 5T → **Diamante**.
-- **Longevidade**: tempo de casa (Cadastro → hoje) em linguagem natural
-  ("N ano(s)", "N mês/meses e D dia(s)", "D dia(s)", "Hoje").
+- **Longevidade**: tempo de casa em **dias** (numérico) — dias de Cadastro até hoje.
+- **Documento** e **Telefone**: saem **sem caracteres especiais** (só letras e
+  dígitos). `359.623.888-95` → `35962388895`; `(11) 99153-6994` → `11991536994`.
 - **Saldo**: `Saldo_Carteira` (somado, no caso de agrupamento).
 
 ## Saída
