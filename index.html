@@ -260,7 +260,8 @@
   function bloqueado(rawDoc) {
     var t = (rawDoc || "").trim();
     if (DOCS_BLOQUEADOS_RAW[t]) return true;
-    return !!DOCS_INTERNOS[soDigitos(t)];
+    var d = soDigitos(t);
+    return !!(DOCS_INTERNOS[d] || DOCS_BLOQUEADOS_DIG[d]);
   }
 
   // Resolve alias -> dominante (texto exato). Não-alias volta como está (trim).
