@@ -42,6 +42,17 @@
     "35793289801": { "Telefone": "11960545827" },
   };
 
+  // "Agrupar iguais" por DATA DE CADASTRO (quando não se tem o documento à mão).
+  // O código descobre os documentos no customerReport pelas datas de cadastro.
+  // Chave = cadastro do registro ALIAS (que some). Valor:
+  //   paraCadastro = cadastro do registro que FICA (a saída herda essa data).
+  //   documento    = (opcional) força este documento no registro final.
+  var GRUPOS_CAD = {
+    "21/09/2026 20:37:52": { paraCadastro: "21/09/2026 20:42:11" },                          // helton
+    "13/09/2026 12:04:10": { paraCadastro: "13/09/2026 11:11:32", documento: "28071141801" }, // wagner (doc do outro cadastro)
+    "16/08/2026 10:29:37": { paraCadastro: "16/08/2026 10:36:00" },                          // ronaldo
+  };
+
   // Índice de aliases por texto exato E por dígitos, para casar em qualquer formato.
   var ALIAS = {};
   for (var _a in GRUPOS) {
@@ -83,18 +94,58 @@
   }
 
   // Resolve alias -> dominante (texto exato). Não-alias volta como está (trim).
-  function resolveDominante(rawDoc) {
+  function resolveDominante(rawDoc, alias) {
+    alias = alias || ALIAS;
     var t = (rawDoc || "").trim();
-    if (ALIAS[t]) return ALIAS[t];
+    if (alias[t]) return alias[t];
     var d = soDigitos(t);
-    if (d && ALIAS[d]) return ALIAS[d];
+    if (d && alias[d]) return alias[d];
     return t;
   }
 
   // Chave de agrupamento (após resolver alias): dígitos, ou o texto se não houver.
-  function chaveDoc(rawDoc) {
-    var dom = resolveDominante(rawDoc);
+  function chaveDoc(rawDoc, alias) {
+    var dom = resolveDominante(rawDoc, alias);
     return soDigitos(dom) || dom.toLowerCase();
+  }
+
+  // Normaliza uma data de cadastro para comparar ("dd/mm/aaaa hh:mm:ss").
+  function normCad(v) { return (v || "").trim().replace(/\s+/g, " "); }
+
+  // Monta o contexto de agrupamento desta execução: junta os grupos estáticos
+  // (por documento) com os grupos por DATA DE CADASTRO, descobrindo os documentos
+  // no próprio customerReport. Retorna { alias, cadFix, over }.
+  function montaContexto(clientes) {
+    var alias = {}, over = {}, cadFix = {}, k;
+    for (k in ALIAS) if (ALIAS.hasOwnProperty(k)) alias[k] = ALIAS[k];
+    for (k in OVERRIDES) if (OVERRIDES.hasOwnProperty(k)) {
+      over[k] = {};
+      for (var f in OVERRIDES[k]) if (OVERRIDES[k].hasOwnProperty(f)) over[k][f] = OVERRIDES[k][f];
+    }
+
+    // índice: cadastro normalizado -> documento (texto exato)
+    var porCad = {};
+    for (var i = 0; i < clientes.length; i++) {
+      var ts = normCad(clientes[i]["Data_Cadastro"]);
+      if (ts && porCad[ts] === undefined) porCad[ts] = (clientes[i]["Documento"] || "").trim();
+    }
+
+    for (var a in GRUPOS_CAD) {
+      if (!GRUPOS_CAD.hasOwnProperty(a)) continue;
+      var spec = GRUPOS_CAD[a];
+      var aliasDoc = porCad[normCad(a)];
+      var domDoc = porCad[normCad(spec.paraCadastro)];
+      if (!aliasDoc || !domDoc) continue;   // registros ainda não estão neste export
+      var domKey = soDigitos(domDoc) || domDoc.toLowerCase();
+      alias[aliasDoc] = domDoc;
+      var ad = soDigitos(aliasDoc); if (ad) alias[ad] = domDoc;
+      cadFix[domKey] = spec.paraCadastro;   // a saída herda a data de cadastro escolhida
+      if (spec.documento) {                 // força o documento final, se pedido
+        over[domKey] = over[domKey] || {};
+        over[domKey]["Documento"] = spec.documento;
+      }
+    }
+    return { alias: alias, cadFix: cadFix, over: over };
   }
 
   function semAcento(v) {
@@ -306,7 +357,7 @@
 
   // ---------------------------------------------------------------- agregacao
 
-  function agregaVendas(linhas) {
+  function agregaVendas(linhas, alias) {
     var porDoc = {};
     for (var i = 0; i < linhas.length; i++) {
       var l = linhas[i];
@@ -315,7 +366,7 @@
       var docRaw = l["Doc_Cliente"];
       if (!soDigitos(docRaw) && !(docRaw || "").trim()) continue;
       if (bloqueado(docRaw)) continue;
-      var doc = chaveDoc(docRaw);   // resolve alias -> chave do dominante
+      var doc = chaveDoc(docRaw, alias);   // resolve alias -> chave do dominante
       if (!doc) continue;
       var ms = parseData(l["Data_Hora"]);
       if (ms == null) continue;
@@ -370,7 +421,8 @@
     return msg;
   }
 
-  function montaLinhas(clientes, vendas, hojeMs) {
+  function montaLinhas(clientes, vendas, hojeMs, ctx) {
+    var alias = ctx.alias, cadFix = ctx.cadFix, over = ctx.over;
     // 1) agrupa linhas de cliente por chave (resolvendo alias), pulando bloqueados.
     var grupos = {}, ordem = [];
     for (var i = 0; i < clientes.length; i++) {
@@ -378,13 +430,13 @@
       var docRaw = c["Documento"];
       if (!(docRaw || "").trim()) continue;
       if (bloqueado(docRaw)) continue;
-      var k = chaveDoc(docRaw);
+      var k = chaveDoc(docRaw, alias);
       if (!k) continue;
       var g = grupos[k];
       if (!g) { g = grupos[k] = { rows: [], dom: null }; ordem.push(k); }
       g.rows.push(c);
       // linha dominante = a que não é alias (resolve para si mesma)
-      if (resolveDominante(docRaw) === (docRaw || "").trim()) g.dom = c;
+      if (resolveDominante(docRaw, alias) === (docRaw || "").trim()) g.dom = c;
     }
 
     var saida = [];
@@ -404,11 +456,15 @@
         saldoCents += parseCents(row["Saldo_Carteira"]);
       }
 
+      // "unificar no <cadastro>": grupos por data forçam a data de cadastro final.
+      var cadStr = cadRow ? cadRow["Data_Cadastro"] : null;
+      if (cadFix[key]) { cadTs = parseTs(cadFix[key]); cadStr = cadFix[key]; }
+
       var cadMs = null, horaCad = "";
       if (cadTs != null) {
         var cd = new Date(cadTs);
         cadMs = Date.UTC(cd.getUTCFullYear(), cd.getUTCMonth(), cd.getUTCDate());
-        var mm = (cadRow["Data_Cadastro"] || "").match(/(\d{2}:\d{2}:\d{2})/);
+        var mm = (cadStr || "").match(/(\d{2}:\d{2}:\d{2})/);
         horaCad = mm ? mm[1] : "";
       }
 
@@ -467,7 +523,7 @@
         "Saldo": fmtCents(saldoCents),
         "Cupons": cupons.join("; "),
       };
-      var ov = OVERRIDES[key];      // sobrescritas por dominante (ex.: telefone do Roberes)
+      var ov = over[key];           // sobrescritas por dominante (ex.: telefone do Roberes)
       if (ov) for (var f in ov) if (ov.hasOwnProperty(f)) {
         rec[f] = (f === "Documento" || f === "Telefone") ? limpaDoc(ov[f]) : ov[f];
       }
@@ -511,7 +567,8 @@
       aviso = "Data de referencia ajustada para " + fmtData(res.hoje) +
               " (ha vendas mais recentes que a data informada).\n" + aviso;
     }
-    var linhas = montaLinhas(clientes, agregaVendas(vendasRaw), res.hoje);
+    var ctx = montaContexto(clientes);   // grupos estáticos + por data de cadastro
+    var linhas = montaLinhas(clientes, agregaVendas(vendasRaw, ctx.alias), res.hoje, ctx);
     return { csv: geraCSV(linhas), linhas: linhas.length, hoje: res.hoje, aviso: aviso };
   }
 

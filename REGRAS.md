@@ -63,6 +63,25 @@ Ao agrupar:
 `OVERRIDES` do `report-core.js`. Ex.: o Roberes fica com o Telefone `11960545827`
 (o do outro cadastro), não o do dominante.
 
+### Agrupar por data de cadastro (`GRUPOS_CAD`)
+
+Quando não se tem o documento à mão, dá para agrupar pela **data de cadastro** — o
+código descobre os documentos sozinho no customerReport. No mapa `GRUPOS_CAD`, a
+chave é o cadastro do registro que **some**, e o valor traz:
+
+- `paraCadastro` = cadastro do registro que **fica** — e a saída **herda essa data**
+  (mesmo que não seja a mais antiga; é o "unificar no").
+- `documento` (opcional) = força este documento no registro final.
+
+| Some (cadastro) | Fica (cadastro) | Doc final | Pessoa |
+|---|---|---|---|
+| 21/09/2026 20:37:52 | 21/09/2026 20:42:11 | (do dominante) | helton |
+| 13/09/2026 12:04:10 | 13/09/2026 11:11:32 | `28071141801` | wagner |
+| 16/08/2026 10:29:37 | 16/08/2026 10:36:00 | (do dominante) | ronaldo |
+
+Se os dois cadastros ainda não estiverem no export, o grupo é simplesmente ignorado
+naquela geração (sem erro) — passa a valer quando o arquivo já os tiver.
+
 ## Parsing
 
 - **Números** (formato BR): remover `.` (milhar), trocar `,` por `.`. Vazio → 0.
