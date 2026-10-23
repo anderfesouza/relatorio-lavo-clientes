@@ -94,13 +94,15 @@ naquela geração (sem erro) — passa a valer quando o arquivo já os tiver.
 
 | Campo | Regra |
 |---|---|
-| **Faturamento** | Soma de `Valor_Pago`, exceto linhas com cupom `eusoubetha`. |
-| **Usos** | Soma da contagem de máquinas de todas as linhas. |
-| **Visitas** | Dias distintos com ≥ 1 máquina (recarga isolada não gera visita). |
+| **LTV** (ex-Faturamento) | Soma de `Valor_Pago`, exceto linhas com cupom `eusoubetha`. |
+| **C** — Ciclos (ex-Usos) | Soma da contagem de máquinas de todas as linhas. |
+| **LAV** | Ciclos só de lavadoras. |
+| **SEC** | Ciclos só de secadoras. (sempre `LAV + SEC = C`) |
+| **V** — Dias Visitados (ex-Visitas) | Dias distintos com ≥ 1 máquina (recarga isolada não gera visita). |
 | **Descontos** | Soma de `(Valor_Venda − Valor_Pago)` quando há cupom válido (≠ `n/d`, ≠ vazio, ≠ `eusoubetha`) e a diferença é positiva. |
 | **Cupons** | Conjunto de `Codigo_Cupom` ≠ `n/d` e ≠ vazio (inclui `eusoubetha`), unidos por "; ", ordenados. |
 
-Recarga conta como faturamento, mas não gera visita nem uso.
+Recarga conta como faturamento, mas não é ciclo, não gera visita nem entra em LAV/SEC.
 
 ## Colunas calculadas
 
@@ -108,9 +110,16 @@ Recarga conta como faturamento, mas não gera visita nem uso.
   vendas. Sem visitas → data de Cadastro.
 - **Ritmo** (antigo "Intervalo"): média, em dias, dos intervalos entre visitas
   consecutivas de **todo o histórico**. ≤ 1 visita → 0. Uma casa decimal.
-- **Dias Visita**: se `Frequentador = Curioso` → hoje − Cadastro; senão hoje − Ultima.
-- **TM (Ticket Médio)**: Faturamento ÷ nº de visitas (por **dia visitado**). Sem
-  visitas → 0.
+- **DRT** — Recência (ex-Dias Visita): se `Frequentador = Curioso` → hoje − Cadastro;
+  senão hoje − Ultima.
+- **C/V** — Ciclos por Visita: C ÷ V, 1 casa decimal (meio-a-cima). V = 0 → 0,0.
+- **TM (Ticket Médio)**: LTV ÷ nº de visitas (por **dia visitado**). Sem visitas → 0.
+- **Mensal** — média de consumo mensal: `V = 0 → 0`; senão
+  `LTV ÷ MÁX(1; Ritmo × (V−1) ÷ 30)`. Usa o Ritmo já arredondado (coluna H). 2 casas.
+- **Voo** — classe de recorrência:
+  - `V < 2` → **—**
+  - `Mensal ≥ 180` → Ritmo ≤ 21 **Foguete**, senão **Jato**
+  - `Mensal < 180` → Ritmo ≤ 21 **Avião**, senão **Pipa**
 - **Frequentador** (primeiro que casar, nesta ordem):
   1. sem visitas → **Curioso**
   2. hoje − última visita > V → **Sumido**
@@ -126,7 +135,8 @@ Recarga conta como faturamento, mas não gera visita nem uso.
   - ⚠️ O Retorno usa a janela de 3V; o **Ritmo** usa o histórico completo.
 - **Bala na Agulha** (pelo TM): 0 → **Liso**; ≤ 2T (36) → **Econômico**;
   ≤ 3T (54) → **Prata**; ≤ 5T (90) → **Ouro**; > 5T → **Diamante**.
-- **Longevidade**: tempo de casa em **dias** (numérico) — dias de Cadastro até hoje.
+- **CT** — Customer Tenure (ex-Longevidade): tempo de casa em **dias** (numérico),
+  de Cadastro até hoje.
 - **Documento** e **Telefone**: saem **sem caracteres especiais** (só letras e
   dígitos). `359.623.888-95` → `35962388895`; `(11) 99153-6994` → `11991536994`.
 - **Saldo**: `Saldo_Carteira` (somado, no caso de agrupamento).
@@ -134,9 +144,9 @@ Recarga conta como faturamento, mas não gera visita nem uso.
 ## Saída
 
 - Ordenação: por **Cadastro** ascendente (mais antigo primeiro).
-- Colunas (19, nesta ordem): `Nome; Documento; Telefone; Email; Cadastro;
-  Longevidade; Ultima; Ritmo; Dias Visita; Retorno; Visitas; Usos; Faturamento;
-  TM; Frequentador; Bala na Agulha; Descontos; Saldo; Cupons`.
+- Colunas (24, nesta ordem): `Nome; Documento; Telefone; Email; Cadastro; CT;
+  Ultima; Ritmo; DRT; Retorno; V; C; C/V; LAV; SEC; LTV; TM; Frequentador;
+  Bala na Agulha; Mensal; Voo; Descontos; Saldo; Cupons`.
 - Formato: CSV `;`, todos os campos entre aspas, UTF-8 **com BOM**.
 - Nome do arquivo: `Clientes_LAVO_BETHA_DD-MM-YYYY.csv`.
 

@@ -63,10 +63,10 @@
   }
 
   var COLUNAS = [
-    "Nome", "Documento", "Telefone", "Email", "Cadastro", "Longevidade",
-    "Ultima", "Ritmo", "Dias Visita", "Retorno", "Visitas", "Usos",
-    "Faturamento", "TM", "Frequentador", "Bala na Agulha", "Descontos",
-    "Saldo", "Cupons",
+    "Nome", "Documento", "Telefone", "Email", "Cadastro", "CT",
+    "Ultima", "Ritmo", "DRT", "Retorno", "V", "C",
+    "C/V", "LAV", "SEC", "LTV", "TM", "Frequentador", "Bala na Agulha",
+    "Mensal", "Voo", "Descontos", "Saldo", "Cupons",
   ];
 
   var DIA = 86400000; // ms num dia
@@ -189,16 +189,20 @@
     return Date.UTC(ano, mes - 1, dia, +(m[4] || 0), +(m[5] || 0), +(m[6] || 0));
   }
 
+  // Conta máquinas na coluna Maquinas -> { n: total, lav: lavadoras, sec: secadoras }.
+  // Recarga não é máquina. Todo ciclo é lavadora OU secadora (n = lav + sec).
   function contaMaquinas(campo) {
     var tokens = (campo || "").split(",");
-    var maquinas = 0, recarga = false;
+    var n = 0, lav = 0, sec = 0;
     for (var i = 0; i < tokens.length; i++) {
-      var tk = tokens[i].trim();
+      var tk = cupomNorm(tokens[i]);
       if (!tk) continue;
-      if (cupomNorm(tk).indexOf("recarga") >= 0) recarga = true;
-      else maquinas += 1;
+      if (tk.indexOf("recarga") >= 0) continue;
+      n += 1;
+      if (tk.indexOf("lavadora") >= 0) lav += 1;
+      else if (tk.indexOf("secadora") >= 0) sec += 1;
     }
-    return maquinas;
+    return { n: n, lav: lav, sec: sec };
   }
 
   // Parser de CSV com delimitador ; e aspas duplas (com "" escapado).
@@ -315,14 +319,40 @@
     return gaps;
   }
 
-  function fmtIntervalo(visitas) {
-    if (visitas.length <= 1) return "0,0";
-    var gaps = gapsDe(visitas), soma = 0;
-    for (var i = 0; i < gaps.length; i++) soma += gaps[i];
-    var decimos = halfEvenDiv(soma * 10, gaps.length); // arredonda 1 casa (half-even)
+  // décimos (inteiro) -> "X,Y"
+  function fmtTenths(decimos) {
     var sinal = decimos < 0 ? "-" : "";
     var a = Math.abs(decimos);
     return sinal + Math.floor(a / 10) + "," + (a % 10);
+  }
+
+  // Ritmo em décimos (meio-a-par, como no original). <=1 visita -> 0.
+  function ritmoTenths(visitas) {
+    if (visitas.length <= 1) return 0;
+    var gaps = gapsDe(visitas), soma = 0;
+    for (var i = 0; i < gaps.length; i++) soma += gaps[i];
+    return halfEvenDiv(soma * 10, gaps.length);
+  }
+
+  function fmtIntervalo(visitas) { return fmtTenths(ritmoTenths(visitas)); }
+
+  // C/V (Ciclos por Visita), 1 casa, meio-a-cima (como ROUND do Excel). V=0 -> "0,0".
+  function fmtCV(c, v) { return v > 0 ? fmtTenths(halfUpDiv(c * 10, v)) : "0,0"; }
+
+  // valor em reais (float) -> "1234,56" (2 casas, meio-a-cima)
+  function fmtReais2(valor) { return fmtCents(Math.round(valor * 100)); }
+
+  // Mensal: média de consumo mensal. =SE(V=0;0; LTV / MÁX(1; Ritmo*(V-1)/30))
+  function mensalValor(fatCents, ritmoVal, v) {
+    if (v === 0) return 0;
+    return (fatCents / 100) / Math.max(1, ritmoVal * (v - 1) / 30);
+  }
+
+  // Voo: classe de recorrência a partir de V, Mensal e Ritmo.
+  function fmtVoo(v, mensal, ritmoVal) {
+    if (v < 2) return "—";
+    if (mensal >= 180) return ritmoVal <= 21 ? "Foguete" : "Jato";
+    return ritmoVal <= 21 ? "Avião" : "Pipa";
   }
 
   // ---------------------------------------------------------------- classificacao
@@ -372,14 +402,16 @@
       if (ms == null) continue;
 
       var ag = porDoc[doc];
-      if (!ag) ag = porDoc[doc] = { fat: 0, usos: 0, visitas: {}, desc: 0, cupons: {} };
+      if (!ag) ag = porDoc[doc] = { fat: 0, usos: 0, lav: 0, sec: 0, visitas: {}, desc: 0, cupons: {} };
 
-      var maquinas = contaMaquinas(l["Maquinas"]);
+      var mq = contaMaquinas(l["Maquinas"]);
       var eusoubetha = cnorm === "eusoubetha";
 
       if (!eusoubetha) ag.fat += parseCents(l["Valor_Pago"]);
-      ag.usos += maquinas;
-      if (maquinas > 0) ag.visitas[ms] = 1;
+      ag.usos += mq.n;
+      ag.lav += mq.lav;
+      ag.sec += mq.sec;
+      if (mq.n > 0) ag.visitas[ms] = 1;
 
       var codigo = l["Codigo_Cupom"];
       if (cupomValido(codigo) && !eusoubetha) {
@@ -468,7 +500,7 @@
         horaCad = mm ? mm[1] : "";
       }
 
-      var ag = vendas[key] || { fat: 0, usos: 0, visitas: {}, desc: 0, cupons: {} };
+      var ag = vendas[key] || { fat: 0, usos: 0, lav: 0, sec: 0, visitas: {}, desc: 0, cupons: {} };
       var visitas = Object.keys(ag.visitas).map(Number).sort(function (a, b) { return a - b; });
 
       var ultimaMs;
@@ -501,6 +533,10 @@
 
       var cupons = Object.keys(ag.cupons).sort();
 
+      var v = visitas.length;
+      var ritmoVal = ritmoTenths(visitas) / 10;        // Ritmo arredondado (= coluna H)
+      var mensal = mensalValor(ag.fat, ritmoVal, v);   // valor cheio p/ decidir o Voo
+
       var rec = {
         _cad: cadTs,
         "Nome": (cli["Nome"] || "").trim(),
@@ -508,17 +544,22 @@
         "Telefone": limpaDoc(cli["Telefone"]),
         "Email": (cli["Email"] || "").trim(),
         "Cadastro": cadMs != null ? fmtDataHora(cadMs, horaCad) : "",
-        "Longevidade": longevidadeDias(cadMs, hojeMs),
+        "CT": longevidadeDias(cadMs, hojeMs),
         "Ultima": fmtData(ultimaMs),
-        "Ritmo": fmtIntervalo(visitas),
-        "Dias Visita": String(diasVisita),
+        "Ritmo": fmtTenths(ritmoTenths(visitas)),
+        "DRT": String(diasVisita),
         "Retorno": fmtData(retornoMs),
-        "Visitas": String(visitas.length),
-        "Usos": String(ag.usos),
-        "Faturamento": fmtCents(ag.fat),
+        "V": String(v),
+        "C": String(ag.usos),
+        "C/V": fmtCV(ag.usos, v),
+        "LAV": String(ag.lav),
+        "SEC": String(ag.sec),
+        "LTV": fmtCents(ag.fat),
         "TM": fmtCents(tmCents),
         "Frequentador": freq,
         "Bala na Agulha": bala,
+        "Mensal": fmtReais2(mensal),
+        "Voo": fmtVoo(v, mensal, ritmoVal),
         "Descontos": fmtCents(ag.desc),
         "Saldo": fmtCents(saldoCents),
         "Cupons": cupons.join("; "),
