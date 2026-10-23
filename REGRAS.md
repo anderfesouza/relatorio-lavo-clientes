@@ -110,7 +110,7 @@ Recarga conta como faturamento, mas não é ciclo, não gera visita nem entra em
   vendas. Sem visitas → data de Cadastro.
 - **Ritmo** (antigo "Intervalo"): média, em dias, dos intervalos entre visitas
   consecutivas de **todo o histórico**. ≤ 1 visita → 0. Uma casa decimal.
-- **DRT** — Recência (ex-Dias Visita): se `Frequentador = Curioso` → hoje − Cadastro;
+- **DRV** — Recência (ex-Dias Visita): se `Frequentador = Curioso` → hoje − Cadastro;
   senão hoje − Ultima.
 - **C/V** — Ciclos por Visita: C ÷ V, 1 casa decimal (meio-a-cima). V = 0 → 0,0.
 - **TM (Ticket Médio)**: LTV ÷ nº de visitas (por **dia visitado**). Sem visitas → 0.
@@ -145,7 +145,7 @@ Recarga conta como faturamento, mas não é ciclo, não gera visita nem entra em
 
 - Ordenação: por **Cadastro** ascendente (mais antigo primeiro).
 - Colunas (24, nesta ordem): `Nome; Documento; Telefone; Email; Cadastro; CT;
-  Ultima; Ritmo; DRT; Retorno; V; C; C/V; LAV; SEC; LTV; TM; Frequentador;
+  Ultima; Ritmo; DRV; Retorno; V; C; C/V; LAV; SEC; LTV; TM; Frequentador;
   Bala na Agulha; Mensal; Voo; Descontos; Saldo; Cupons`.
 - Formato: CSV `;`, todos os campos entre aspas, UTF-8 **com BOM**.
 - Nome do arquivo: `Clientes_LAVO_BETHA_DD-MM-YYYY.csv`.

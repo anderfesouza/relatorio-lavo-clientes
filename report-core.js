@@ -64,7 +64,7 @@
 
   var COLUNAS = [
     "Nome", "Documento", "Telefone", "Email", "Cadastro", "CT",
-    "Ultima", "Ritmo", "DRT", "Retorno", "V", "C",
+    "Ultima", "Ritmo", "DRV", "Retorno", "V", "C",
     "C/V", "LAV", "SEC", "LTV", "TM", "Frequentador", "Bala na Agulha",
     "Mensal", "Voo", "Descontos", "Saldo", "Cupons",
   ];
@@ -547,7 +547,7 @@
         "CT": longevidadeDias(cadMs, hojeMs),
         "Ultima": fmtData(ultimaMs),
         "Ritmo": fmtTenths(ritmoTenths(visitas)),
-        "DRT": String(diasVisita),
+        "DRV": String(diasVisita),
         "Retorno": fmtData(retornoMs),
         "V": String(v),
         "C": String(ag.usos),
